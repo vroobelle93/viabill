@@ -1,0 +1,71 @@
+-- Task 1.a
+-- COMMENT: I am creating a table based on SELECT statement for easier access in further steps. 
+-- 			In fact if it wasn't meant to be used in the future with fresh data, views should be more appropriate.
+-- COMMENT: I assume in this task I had to select whole transaction row, with all data possible. If there was
+--			just its ID needed then just the subquery statement should be executed.
+DROP TABLE IF EXISTS query_1a;
+CREATE TABLE query_1a AS
+	SELECT t1.*
+	FROM transactions t1
+	INNER JOIN (
+		SELECT customerID
+				,max(transactionID) AS max_trn_ID
+		FROM transactions
+		WHERE customerID IS NOT NULL
+		GROUP BY customerID
+	) t2
+		ON t1.customerID = t2.customerID
+		AND t1.transactionID = t2.max_trn_ID
+;
+
+-- Task 1.b
+DROP TABLE IF EXISTS query_1b;
+CREATE TABLE query_1b AS
+	SELECT t1.*
+			,coalesce(t2.income, -999) AS income
+	FROM query_1a t1
+	LEFT JOIN customers t2
+		ON t1.customerID = t2.customerID
+	ORDER BY customerID
+;
+
+--Task 2
+-- COMMENT: I assume that we calculate mean from transactions, so we divide it by their count, instead of 3 by default.
+DROP TABLE IF EXISTS transactions_enum;
+CREATE TABLE transactions_enum AS
+	SELECT customerID
+			,transactionID
+			,price
+			,row_number() OVER (
+				PARTITION BY customerID
+				ORDER BY transactionID DESC
+				) AS trn_recency
+	FROM transactions
+	ORDER BY customerID, transactionID DESC
+;
+
+DROP TABLE IF EXISTS transactions_pivot;
+CREATE TABLE transactions_pivot AS
+	SELECT customerID
+			,MAX(CASE WHEN trn_recency = 2 THEN price END) AS price_trn_m1
+			,MAX(CASE WHEN trn_recency = 3 THEN price END) AS price_trn_m2
+			,MAX(CASE WHEN trn_recency = 4 THEN price END) AS price_trn_m3
+	FROM transactions_enum
+	GROUP BY customerID
+	ORDER BY customerID
+;
+
+DROP TABLE IF EXISTS query_2;
+CREATE TABLE query_2 AS
+	SELECT t1.*
+			,CASE WHEN t2.price_trn_m1 IS Null THEN 0
+				ELSE ROUND(
+						CAST(t2.price_trn_m1 + COALESCE(t2.price_trn_m2, 0) + COALESCE(t2.price_trn_m3, 0) AS Float) / 
+						CAST(COUNT(t2.price_trn_m1) + COUNT(t2.price_trn_m2) + COUNT(t2.price_trn_m3) AS Float)
+						, 2)
+				END AS trans_price_avg_lst3
+	FROM query_1a t1
+	LEFT JOIN transactions_pivot t2
+		ON t1.customerID = t2.customerID
+	GROUP BY t1.customerID
+;
